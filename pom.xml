@@ -11,7 +11,7 @@
     <packaging>jar</packaging>
 
     <name>Java Utils Toolkit</name>
-    <description>实用小工具集合 - PDF批量合并等</description>
+    <description>Java Utils Toolkit - PDF Merger, Doc Converter, Case Assignment</description>
 
     <properties>
         <maven.compiler.source>21</maven.compiler.source>

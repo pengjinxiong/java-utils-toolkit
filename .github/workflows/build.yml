@@ -87,6 +87,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path target\dist | Out-Null
           $jpackage = "$env:JAVA_HOME\bin\jpackage.exe"
           Write-Host "Using jpackage: $jpackage"
+          # 所有参数必须纯 ASCII，否则 WiX light.exe codepage 1252 会失败
           & $jpackage `
             --input target `
             --name JavaUtilsToolkit `
@@ -98,8 +99,9 @@ jobs:
             --win-menu `
             --win-shortcut `
             --app-version 1.0.0 `
-            --vendor Toolkit `
-            --java-options "-Dfile.encoding=UTF-8" `
+            --vendor "Toolkit" `
+            --description "Java Utils Toolkit" `
+            --copyright "Toolkit" `
             --java-options "-Xmx512m" `
             --dest target\dist `
             --verbose
