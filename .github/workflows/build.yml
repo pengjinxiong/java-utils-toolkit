@@ -104,10 +104,25 @@ jobs:
             --copyright "Toolkit" `
             --java-options "-Xmx512m" `
             --dest target\dist `
-            --verbose
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "jpackage failed with exit code $LASTEXITCODE"
-            exit $LASTEXITCODE
+            --verbose 2>&1 | Tee-Object -Variable jpackageOutput
+          $exitCode = $LASTEXITCODE
+          # 失败时寻找并打印 bundle.wxf 第 1650-1670 行，定位中文来源
+          if ($exitCode -ne 0) {
+            Write-Host "=== jpackage failed, searching for bundle.wxf ==="
+            $tmpDirs = Get-ChildItem "$env:TEMP" -Filter "jdk.jpackage*" -Directory -ErrorAction SilentlyContinue
+            foreach ($d in $tmpDirs) {
+              $wxf = Join-Path $d.FullName "config\bundle.wxf"
+              if (Test-Path $wxf) {
+                Write-Host "=== bundle.wxf found: $wxf ==="
+                $lines = Get-Content $wxf -Encoding UTF8
+                $start = [Math]::Max(0, 1645)
+                $end   = [Math]::Min($lines.Count - 1, 1670)
+                Write-Host "=== Lines $start to $end ==="
+                $lines[$start..$end] | ForEach-Object { Write-Host $_ }
+              }
+            }
+            Write-Error "jpackage failed with exit code $exitCode"
+            exit $exitCode
           }
 
       - name: Upload Windows artifact
