@@ -139,6 +139,8 @@
                                     <goal>exec</goal>
                                 </goals>
                                 <configuration>
+                                    <!-- 通过 -DskipJpackage=true 可跳过此步骤 -->
+                                    <skip>${skipJpackage}</skip>
                                     <executable>jpackage</executable>
                                     <arguments>
                                         <argument>--input</argument>
@@ -198,6 +200,8 @@
                                     <goal>exec</goal>
                                 </goals>
                                 <configuration>
+                                    <!-- 通过 -DskipJpackage=true 可跳过此步骤 -->
+                                    <skip>${skipJpackage}</skip>
                                     <executable>jpackage</executable>
                                     <arguments>
                                         <argument>--input</argument>
