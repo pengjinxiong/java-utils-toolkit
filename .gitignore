@@ -27,3 +27,11 @@ bin/
 
 ### Mac OS ###
 .DS_Store
+
+### Build outputs ###
+target/
+*.jar
+*.class
+
+### Image RAW ###
+*.dmg

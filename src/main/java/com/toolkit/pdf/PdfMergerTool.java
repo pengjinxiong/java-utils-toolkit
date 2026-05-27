@@ -69,23 +69,33 @@ public class PdfMergerTool {
         try {
             UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
         } catch (Exception ignored) {}
-
-        SwingUtilities.invokeLater(() -> new PdfMergerTool().createAndShowGUI());
+        SwingUtilities.invokeLater(() -> new PdfMergerTool().createAndShowGUI(null));
     }
 
-    private void createAndShowGUI() {
+    /** 从 Launcher 启动 */
+    public static void launch(Runnable onBack) {
+        try {
+            UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+        } catch (Exception ignored) {}
+        SwingUtilities.invokeLater(() -> new PdfMergerTool().createAndShowGUI(onBack));
+    }
+
+    private void createAndShowGUI(Runnable onBack) {
         frame = new JFrame("PDF 批量合并工具 v2.0");
         frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
         frame.setSize(950, 650);
         frame.setMinimumSize(new Dimension(750, 500));
         frame.setLocationRelativeTo(null);
-
-        initComponents();
-
+        if (onBack != null) {
+            frame.addWindowListener(new java.awt.event.WindowAdapter() {
+                @Override public void windowClosed(java.awt.event.WindowEvent e) { onBack.run(); }
+            });
+        }
+        initComponents(onBack);
         frame.setVisible(true);
     }
 
-    private void initComponents() {
+    private void initComponents(Runnable onBack) {
         // 数据模型
         tableModel = new DefaultTableModel(COLUMNS, 0) {
             @Override
@@ -117,8 +127,8 @@ public class PdfMergerTool {
                 BorderFactory.createEtchedBorder(), "待合并文件夹列表（拖拽或按钮添加）",
                 TitledBorder.LEFT, TitledBorder.TOP));
 
-        // 顶部按钮区
-        JPanel topPanel = createTopPanel();
+        // 顶部按钒区
+        JPanel topPanel = createTopPanel(onBack);
 
         // 底部面板
         JPanel bottomPanel = createBottomPanel();
@@ -160,7 +170,7 @@ public class PdfMergerTool {
         }, true);
     }
 
-    private JPanel createTopPanel() {
+    private JPanel createTopPanel(Runnable onBack) {
         JButton btnAddFolder = new JButton("📁 添加文件夹");
         JButton btnAddParent = new JButton("📂 添加父目录（扫描子文件夹）");
         JButton btnRemove = new JButton("❌ 移除选中");
@@ -171,6 +181,21 @@ public class PdfMergerTool {
         panel.add(btnAddParent);
         panel.add(btnRemove);
         panel.add(btnClear);
+        // 返回主界面按钒（靠右）
+        if (onBack != null) {
+            JPanel wrapPanel = new JPanel(new BorderLayout());
+            wrapPanel.add(panel, BorderLayout.WEST);
+            JButton btnBack = new JButton("← 返回主界面");
+            btnBack.addActionListener(e -> frame.dispose());
+            JPanel rightPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 6));
+            rightPanel.add(btnBack);
+            wrapPanel.add(rightPanel, BorderLayout.EAST);
+            btnAddFolder.addActionListener(e -> addFoldersByDialog());
+            btnAddParent.addActionListener(e -> addParentFolder());
+            btnRemove.addActionListener(e -> removeSelectedRows());
+            btnClear.addActionListener(e -> clearAllRows());
+            return wrapPanel;
+        }
 
         // 按钮事件
         btnAddFolder.addActionListener(e -> addFoldersByDialog());

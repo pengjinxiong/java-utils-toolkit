@@ -18,6 +18,8 @@
         <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <pdfbox.version>3.0.2</pdfbox.version>
+        <poi.version>5.2.5</poi.version>
+        <fastexcel.version>0.18.4</fastexcel.version>
     </properties>
 
     <dependencies>
@@ -25,6 +27,32 @@
             <groupId>org.apache.pdfbox</groupId>
             <artifactId>pdfbox</artifactId>
             <version>${pdfbox.version}</version>
+        </dependency>
+        <!-- Apache POI: doc/docx 解析 -->
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi</artifactId>
+            <version>${poi.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>${poi.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-scratchpad</artifactId>
+            <version>${poi.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.dhatim</groupId>
+            <artifactId>fastexcel-reader</artifactId>
+            <version>${fastexcel.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.dhatim</groupId>
+            <artifactId>fastexcel</artifactId>
+            <version>${fastexcel.version}</version>
         </dependency>
         <dependency>
             <groupId>org.slf4j</groupId>
@@ -123,6 +151,8 @@
                                         <argument>com.toolkit.Launcher</argument>
                                         <argument>--type</argument>
                                         <argument>dmg</argument>
+                                        <argument>--icon</argument>
+                                        <argument>${project.basedir}/src/main/resources/icon.icns</argument>
                                         <argument>--app-version</argument>
                                         <argument>${project.version}</argument>
                                         <argument>--vendor</argument>
@@ -180,6 +210,8 @@
                                         <argument>com.toolkit.Launcher</argument>
                                         <argument>--type</argument>
                                         <argument>exe</argument>
+                                        <argument>--icon</argument>
+                                        <argument>${project.basedir}/src/main/resources/icon.ico</argument>
                                         <argument>--win-dir-chooser</argument>
                                         <argument>--win-menu</argument>
                                         <argument>--win-shortcut</argument>
