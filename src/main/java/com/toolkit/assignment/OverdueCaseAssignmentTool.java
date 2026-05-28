@@ -39,21 +39,23 @@ public class OverdueCaseAssignmentTool {
 
     /** Excel 列索引 */
     private static final int COL_ORDER_NO = 0;
-    private static final int COL_COLLECTOR = 1;
-    private static final int COL_OVERDUE_DAYS = 2;
-    private static final int COL_REPAID_PERIODS = 3;
-    private static final int COL_OVERDUE_AMOUNT = 4;
-    private static final int COL_COMPANY = 5;
+    private static final int COL_CUSTOMER_NAME = 1;
+    private static final int COL_COLLECTOR = 2;
+    private static final int COL_OVERDUE_DAYS = 3;
+    private static final int COL_REPAID_PERIODS = 4;
+    private static final int COL_OVERDUE_AMOUNT = 5;
+    private static final int COL_COMPANY = 6;
 
     /** 结果表列定义 */
-    private static final String[] RESULT_COLUMNS = {"订单号", "原催收员", "逾期天数", "已还期数", "逾期金额", "归属公司", "分案人员"};
+    private static final String[] RESULT_COLUMNS = {"订单号", "客户姓名", "原催收员", "逾期天数", "已还期数", "逾期金额", "归属公司", "分案人员"};
     private static final int RES_COL_ORDER = 0;
-    private static final int RES_COL_ORIG = 1;
-    private static final int RES_COL_DAYS = 2;
-    private static final int RES_COL_PAID = 3;
-    private static final int RES_COL_AMOUNT = 4;
-    private static final int RES_COL_COMPANY = 5;
-    private static final int RES_COL_ASSIGNED = 6;
+    private static final int RES_COL_NAME = 1;
+    private static final int RES_COL_ORIG = 2;
+    private static final int RES_COL_DAYS = 3;
+    private static final int RES_COL_PAID = 4;
+    private static final int RES_COL_AMOUNT = 5;
+    private static final int RES_COL_COMPANY = 6;
+    private static final int RES_COL_ASSIGNED = 7;
 
     private static final String TAB_M3 = "M3 分案";
     private static final String[] TAB_NAMES = {"M1 分案", "M2 分案", TAB_M3};
@@ -311,6 +313,7 @@ public class OverdueCaseAssignmentTool {
         ((DefaultTableCellRenderer) header.getDefaultRenderer()).setHorizontalAlignment(SwingConstants.CENTER);
         // 列宽
         resultTable.getColumnModel().getColumn(RES_COL_ORDER).setPreferredWidth(200);
+        resultTable.getColumnModel().getColumn(RES_COL_NAME).setPreferredWidth(80);
         resultTable.getColumnModel().getColumn(RES_COL_ORIG).setPreferredWidth(80);
         resultTable.getColumnModel().getColumn(RES_COL_DAYS).setPreferredWidth(70);
         resultTable.getColumnModel().getColumn(RES_COL_PAID).setPreferredWidth(70);
@@ -714,6 +717,7 @@ public class OverdueCaseAssignmentTool {
                 if (orderNo == null || orderNo.trim().isEmpty()) continue;
                 rows.add(new String[]{
                         orderNo.trim(),
+                        getCellText(row, COL_CUSTOMER_NAME).trim(),
                         getCellText(row, COL_COLLECTOR).trim(),
                         getCellText(row, COL_OVERDUE_DAYS).trim(),
                         getCellText(row, COL_REPAID_PERIODS).trim(),
@@ -736,6 +740,7 @@ public class OverdueCaseAssignmentTool {
                 if (orderNo == null || orderNo.trim().isEmpty()) continue;
                 rows.add(new String[]{
                         orderNo.trim(),
+                        getCellText(row, COL_CUSTOMER_NAME).trim(),
                         getCellText(row, COL_COLLECTOR).trim(),
                         getCellText(row, COL_OVERDUE_DAYS).trim(),
                         getCellText(row, COL_REPAID_PERIODS).trim(),
@@ -909,7 +914,7 @@ public class OverdueCaseAssignmentTool {
         for (int i = 0; i < total; i++) {
             String[] orig = caseRows.get(i);
             result.add(new String[]{
-                    orig[COL_ORDER_NO], orig[COL_COLLECTOR], orig[COL_OVERDUE_DAYS],
+                    orig[COL_ORDER_NO], orig[COL_CUSTOMER_NAME], orig[COL_COLLECTOR], orig[COL_OVERDUE_DAYS],
                     orig[COL_REPAID_PERIODS], orig[COL_OVERDUE_AMOUNT],
                     orig.length > COL_COMPANY ? orig[COL_COMPANY] : "",
                     assignments[i]
@@ -917,7 +922,7 @@ public class OverdueCaseAssignmentTool {
         }
         return result;
     }
-    
+
     /**
      * 从候选中选出最优人选
      * requireDiffCompany=true 时只看不同公司的候选人，否则全部候选人都看
@@ -1115,7 +1120,7 @@ public class OverdueCaseAssignmentTool {
         for (int i = 0; i < total; i++) {
             String[] orig = shuffled.get(i);
             result.add(new String[]{
-                    orig[COL_ORDER_NO], orig[COL_COLLECTOR], orig[COL_OVERDUE_DAYS],
+                    orig[COL_ORDER_NO], orig[COL_CUSTOMER_NAME], orig[COL_COLLECTOR], orig[COL_OVERDUE_DAYS],
                     orig[COL_REPAID_PERIODS], orig[COL_OVERDUE_AMOUNT],
                     orig.length > COL_COMPANY ? orig[COL_COMPANY] : "",
                     assignments[i]
@@ -1265,7 +1270,7 @@ public class OverdueCaseAssignmentTool {
                 }
             }
             ws.width(0, 250); ws.width(1, 100); ws.width(2, 100);
-            ws.width(3, 100); ws.width(4, 120); ws.width(5, 150); ws.width(6, 150);
+            ws.width(3, 100); ws.width(4, 100); ws.width(5, 120); ws.width(6, 150); ws.width(7, 150);
         }
     }
 
