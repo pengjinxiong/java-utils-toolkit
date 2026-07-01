@@ -335,7 +335,43 @@ public class OverdueCaseAssignmentTool {
         state.lblStats = new JLabel("");
         state.lblStats.setFont(F_LABEL);
         state.lblStats.setForeground(new Color(22, 110, 52));
-        bottomPanel.add(state.lblStats, BorderLayout.CENTER);
+        state.statsTextArea = new JTextArea(4, 40);
+        state.statsTextArea.setEditable(false);
+        state.statsTextArea.setLineWrap(true);
+        state.statsTextArea.setWrapStyleWord(true);
+        state.statsTextArea.setFont(F_LABEL);
+        state.statsTextArea.setForeground(new Color(45, 55, 70));
+        state.statsTextArea.setBackground(C_CARD);
+        state.statsTextArea.setBorder(BorderFactory.createEmptyBorder(4, 0, 4, 0));
+        JScrollPane statsScroll = new JScrollPane(state.statsTextArea);
+        statsScroll.setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4));
+        state.dayStatsTableModel = new DefaultTableModel(new String[]{"分案人员", "合计"}, 0) {
+            @Override public boolean isCellEditable(int r, int c) { return false; }
+        };
+        JTable dayStatsTable = new JTable(state.dayStatsTableModel);
+        dayStatsTable.setFont(F_LABEL);
+        dayStatsTable.setRowHeight(24);
+        dayStatsTable.getTableHeader().setFont(F_BOLD_13);
+        dayStatsTable.getTableHeader().setReorderingAllowed(false);
+        JScrollPane dayStatsScroll = new JScrollPane(dayStatsTable);
+        dayStatsScroll.setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4));
+        JTabbedPane statsTabs = new JTabbedPane();
+        statsTabs.setFont(F_BOLD_13);
+        statsTabs.addTab("人员汇总", statsScroll);
+        statsTabs.addTab("逾期天数分布", dayStatsScroll);
+        statsTabs.setBorder(BorderFactory.createTitledBorder(
+                BorderFactory.createLineBorder(C_BORDER, 1, true),
+                "分配统计",
+                TitledBorder.LEFT,
+                TitledBorder.TOP,
+                F_BOLD_13,
+                new Color(38, 85, 168)));
+        statsTabs.setPreferredSize(new Dimension(0, 116));
+        JPanel statsPanel = new JPanel(new BorderLayout(0, 4));
+        statsPanel.setOpaque(false);
+        statsPanel.add(state.lblStats, BorderLayout.NORTH);
+        statsPanel.add(statsTabs, BorderLayout.CENTER);
+        bottomPanel.add(statsPanel, BorderLayout.CENTER);
         JButton btnExport = styledButton("导出结果 Excel", C_PRIMARY, C_PRIMARY_HOVER, 130, 32);
         btnExport.setEnabled(false);
         bottomPanel.add(btnExport, BorderLayout.EAST);
@@ -822,6 +858,10 @@ public class OverdueCaseAssignmentTool {
             StringBuilder sb = new StringBuilder("分案完成！各人案件数：");
             personCount.forEach((n, c) -> sb.append(n).append("(").append(c).append(") "));
             state.lblStats.setText(sb.toString());
+            state.statsTextArea.setText(buildM1M2PersonStatsText(result));
+            state.statsTextArea.setCaretPosition(0);
+            updateM1M2DayStatsTable(state.dayStatsTableModel, result);
+            showM1M2DayStatsDialog(result);
             state.statusLabel.setText(sb.toString());
             state.statusLabel.setForeground(new Color(0, 140, 0));
 
@@ -842,10 +882,10 @@ public class OverdueCaseAssignmentTool {
 
     /**
      * M1/M2 分案算法：
-     * 1. 所有案件混合，所有分案人员均分（差値<=1）
+     * 1. 所有案件按逾期天数分组处理
      * 2. 硬约束：分案人员 != 原催收员（姓名不同）
      * 3. 软约束：尽量让分案人员与原催收员不属于同一公司
-     * 4. 次级均衡：在满足以上约束的候选中，优先选择「逾期天数+已还期数+逾期金额」累计负载最小的人
+     * 4. 按输入人员顺序领取从小到大的逾期天数案件；优先保证每个逾期天数组内均分，再兼顾总数量
      */
     private List<String[]> assignCasesM1M2(List<String[]> caseRows, List<String> personnel,
                                             Map<String, String> collectorToCompany,
@@ -854,62 +894,52 @@ public class OverdueCaseAssignmentTool {
         int n = personnel.size();
         int base = total / n, rem = total % n;
     
-        List<String> shuffled = new ArrayList<>(personnel);
-        Collections.shuffle(shuffled, new Random());
-    
         List<PersonQuota> quotas = new ArrayList<>();
         for (int i = 0; i < n; i++) {
-            quotas.add(new PersonQuota(shuffled.get(i), base + (i < rem ? 1 : 0)));
+            quotas.add(new PersonQuota(personnel.get(i), base + (i < rem ? 1 : 0), i));
         }
-    
-        List<Integer> indices = new ArrayList<>();
-        for (int i = 0; i < total; i++) indices.add(i);
-        Collections.shuffle(indices, new Random());
-    
-        // 预计算全局各维度汇总（用于归一化评分，避免金额字段压倒天数）
-        double sumDays = 0, sumPeriods = 0, sumAmount = 0;
-        for (String[] row : caseRows) {
-            sumDays    += parseDouble(row[COL_OVERDUE_DAYS]);
-            sumPeriods += parseDouble(row[COL_REPAID_PERIODS]);
-            sumAmount  += parseDouble(row[COL_OVERDUE_AMOUNT]);
+
+        Map<String, List<Integer>> indicesByOverdueDay = new TreeMap<>(this::compareOverdueDayKey);
+        for (int i = 0; i < total; i++) {
+            indicesByOverdueDay.computeIfAbsent(overdueDayKey(caseRows.get(i)), k -> new ArrayList<>()).add(i);
         }
-        // 每人应分到的平均目标量（用于归一化基准）
-        final double avgDays    = sumDays    / n;
-        final double avgPeriods = sumPeriods / n;
-        final double avgAmount  = sumAmount  / n;
     
         // personnelToCompany 已由调用方传入，直接使用，无需再推断
         String[] assignments = new String[total];
-    
-        for (int idx : indices) {
-            String[] curRow = caseRows.get(idx);
-            String origCollector = curRow[COL_COLLECTOR];
-            String origCompany   = collectorToCompany.getOrDefault(origCollector, "");
-    
-            // 选最优候选人：优先级 配额 > 公司约束 > 负载得分
-            PersonQuota best = pickBest(quotas, origCollector, origCompany, personnelToCompany,
-                    avgDays, avgPeriods, avgAmount, true);
-    
-            // 降级：允许同公司
-            if (best == null) {
-                best = pickBest(quotas, origCollector, origCompany, personnelToCompany,
-                        avgDays, avgPeriods, avgAmount, false);
+        Map<String, PersonQuota> quotaByName = new HashMap<>();
+        for (PersonQuota pq : quotas) quotaByName.put(pq.name, pq);
+
+        for (Map.Entry<String, List<Integer>> dayEntry : indicesByOverdueDay.entrySet()) {
+            String overdueDay = dayEntry.getKey();
+            Map<String, Integer> dayAssignedCount = new HashMap<>();
+            for (int idx : dayEntry.getValue()) {
+                String[] curRow = caseRows.get(idx);
+                String origCollector = curRow[COL_COLLECTOR];
+                String origCompany   = collectorToCompany.getOrDefault(origCollector, "");
+
+                // 优先按逾期天数组内均分，再用当前总单量做次级数量均衡
+                PersonQuota best = pickBest(quotas, origCollector, origCompany, personnelToCompany,
+                        dayAssignedCount, true, dayEntry.getValue().size());
+
+                // 降级：允许同公司
+                if (best == null) {
+                    best = pickBest(quotas, origCollector, origCompany, personnelToCompany,
+                            dayAssignedCount, false, dayEntry.getValue().size());
+                }
+
+                if (best == null) {
+                    boolean swapped = trySwapM1M2(assignments, caseRows, quotas, quotaByName, idx, curRow, origCollector);
+                    if (!swapped) throw new RuntimeException("无法为订单 " + curRow[COL_ORDER_NO] + " 分配");
+                    rebuildDayAssignedCount(dayAssignedCount, assignments, caseRows, overdueDay);
+                    continue;
+                }
+                best.addCase(curRow);
+                assignments[idx] = best.name;
+                dayAssignedCount.merge(best.name, 1, Integer::sum);
             }
-    
-            if (best == null) {
-                boolean swapped = trySwapM1M2(assignments, caseRows, quotas, idx, origCollector,
-                        origCompany, personnelToCompany);
-                if (!swapped) throw new RuntimeException("无法为订单 " + curRow[COL_ORDER_NO] + " 分配");
-                continue;
-            }
-            // 更新配额与三项累计
-            best.assigned++;
-            best.totalDays    += parseDouble(curRow[COL_OVERDUE_DAYS]);
-            best.totalPeriods += parseDouble(curRow[COL_REPAID_PERIODS]);
-            best.totalAmount  += parseDouble(curRow[COL_OVERDUE_AMOUNT]);
-            assignments[idx] = best.name;
         }
-    
+        rebalanceTotalsM1M2(assignments, caseRows, quotas, personnelToCompany, collectorToCompany);
+
         List<String[]> result = new ArrayList<>();
         for (int i = 0; i < total; i++) {
             String[] orig = caseRows.get(i);
@@ -923,20 +953,76 @@ public class OverdueCaseAssignmentTool {
         return result;
     }
 
+    private void rebuildDayAssignedCount(Map<String, Integer> dayAssignedCount, String[] assignments,
+                                         List<String[]> caseRows, String overdueDay) {
+        dayAssignedCount.clear();
+        for (int i = 0; i < assignments.length; i++) {
+            if (assignments[i] == null) continue;
+            if (overdueDay.equals(overdueDayKey(caseRows.get(i)))) {
+                dayAssignedCount.merge(assignments[i], 1, Integer::sum);
+            }
+        }
+    }
+
+    private String overdueDayKey(String[] row) {
+        String raw = row[COL_OVERDUE_DAYS] == null ? "" : row[COL_OVERDUE_DAYS].trim();
+        if (raw.isEmpty()) return "未知";
+        double value = parseDouble(raw);
+        if (value > 0 || "0".equals(raw) || "0.0".equals(raw)) return formatStatNumber(value);
+        return raw;
+    }
+
+    private int compareOverdueDayKey(String a, String b) {
+        double av = parseDouble(a);
+        double bv = parseDouble(b);
+        boolean an = isNumericText(a);
+        boolean bn = isNumericText(b);
+        if (an && bn) return Double.compare(av, bv);
+        if (an) return -1;
+        if (bn) return 1;
+        return a.compareTo(b);
+    }
+
+    private boolean isNumericText(String value) {
+        if (value == null || value.trim().isEmpty()) return false;
+        try {
+            Double.parseDouble(value.trim().replace(",", ""));
+            return true;
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
     /**
      * 从候选中选出最优人选
      * requireDiffCompany=true 时只看不同公司的候选人，否则全部候选人都看
-     * 选择规则：配额剩余最多者优先；配额相同时按负载得分最小者优先
+     * 选择规则：优先让当前逾期天数组内均分，其次让总订单数量更均衡，最后按输入顺序兜底
      */
     private PersonQuota pickBest(List<PersonQuota> quotas,
                                   String origCollector, String origCompany,
                                   Map<String, String> personnelToCompany,
-                                  double avgDays, double avgPeriods, double avgAmount,
-                                  boolean requireDiffCompany) {
+                                  Map<String, Integer> dayAssignedCount,
+                                  boolean requireDiffCompany,
+                                  int dayTotal) {
+        PersonQuota best = pickBest(quotas, origCollector, origCompany, personnelToCompany,
+                dayAssignedCount, requireDiffCompany, dayTotal, true);
+        if (best != null) return best;
+        return pickBest(quotas, origCollector, origCompany, personnelToCompany,
+                dayAssignedCount, requireDiffCompany, dayTotal, false);
+    }
+
+    private PersonQuota pickBest(List<PersonQuota> quotas,
+                                  String origCollector, String origCompany,
+                                  Map<String, String> personnelToCompany,
+                                  Map<String, Integer> dayAssignedCount,
+                                  boolean requireDiffCompany,
+                                  int dayTotal,
+                                  boolean enforceDayLimit) {
         PersonQuota best = null;
-        double bestScore = Double.MAX_VALUE;
+        int bestDayCount = Integer.MAX_VALUE;
+        int bestAssigned = Integer.MAX_VALUE;
+        int maxAllowedDayCount = (dayTotal + quotas.size() - 1) / quotas.size();
         for (PersonQuota pq : quotas) {
-            if (pq.remaining() <= 0) continue;
             if (pq.name.equals(origCollector)) continue;
             if (requireDiffCompany) {
                 String pCompany = personnelToCompany.getOrDefault(pq.name, "");
@@ -944,18 +1030,217 @@ public class OverdueCaseAssignmentTool {
                         || pCompany.isEmpty() || origCompany.isEmpty();
                 if (!diffCompany) continue;
             }
-            // 优先选配额剩余最多的；配额相同时按负载得分最小选
+            int dayCount = dayAssignedCount.getOrDefault(pq.name, 0);
+            if (enforceDayLimit && dayCount >= maxAllowedDayCount) continue;
             if (best == null
-                    || pq.remaining() > best.remaining()
-                    || (pq.remaining() == best.remaining()
-                        && pq.loadScore(avgDays, avgPeriods, avgAmount) < bestScore)) {
+                    || dayCount < bestDayCount
+                    || (dayCount == bestDayCount && pq.assigned < bestAssigned)
+                    || (dayCount == bestDayCount && pq.assigned == bestAssigned
+                        && pq.order < best.order)) {
                 best = pq;
-                bestScore = pq.loadScore(avgDays, avgPeriods, avgAmount);
+                bestDayCount = dayCount;
+                bestAssigned = pq.assigned;
             }
         }
         return best;
     }
-    
+
+    private void rebalanceTotalsM1M2(String[] assignments, List<String[]> caseRows,
+                                      List<PersonQuota> quotas,
+                                      Map<String, String> personnelToCompany,
+                                      Map<String, String> collectorToCompany) {
+        int maxMoves = caseRows.size() * quotas.size();
+        for (int i = 0; i < maxMoves; i++) {
+            boolean moved = tryRebalanceOneMove(assignments, caseRows, quotas,
+                    personnelToCompany, collectorToCompany, true);
+            if (!moved) {
+                moved = tryRebalanceOneMove(assignments, caseRows, quotas,
+                        personnelToCompany, collectorToCompany, false);
+            }
+            if (!moved) return;
+            if (maxAssigned(quotas) - minAssigned(quotas) <= 1) return;
+        }
+    }
+
+    private boolean tryRebalanceOneMove(String[] assignments, List<String[]> caseRows,
+                                         List<PersonQuota> quotas,
+                                         Map<String, String> personnelToCompany,
+                                         Map<String, String> collectorToCompany,
+                                         boolean requireDiffCompany) {
+        List<PersonQuota> highList = new ArrayList<>(quotas);
+        highList.sort((a, b) -> Integer.compare(b.assigned, a.assigned));
+        List<PersonQuota> lowList = new ArrayList<>(quotas);
+        lowList.sort(Comparator.comparingInt((PersonQuota p) -> p.assigned).thenComparingInt(p -> p.order));
+
+        Map<String, Map<String, Integer>> dayCounts = buildPersonDayCounts(assignments, caseRows);
+        for (PersonQuota high : highList) {
+            for (PersonQuota low : lowList) {
+                if (high == low || high.assigned - low.assigned <= 1) continue;
+                int idx = findMovableCase(assignments, caseRows, high, low, dayCounts,
+                        personnelToCompany, collectorToCompany, requireDiffCompany);
+                if (idx < 0) continue;
+                high.removeCase(caseRows.get(idx));
+                low.addCase(caseRows.get(idx));
+                assignments[idx] = low.name;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private int findMovableCase(String[] assignments, List<String[]> caseRows,
+                                PersonQuota high, PersonQuota low,
+                                Map<String, Map<String, Integer>> dayCounts,
+                                Map<String, String> personnelToCompany,
+                                Map<String, String> collectorToCompany,
+                                boolean requireDiffCompany) {
+        for (int i = 0; i < assignments.length; i++) {
+            if (!high.name.equals(assignments[i])) continue;
+            String[] row = caseRows.get(i);
+            String origCollector = row[COL_COLLECTOR];
+            if (low.name.equals(origCollector)) continue;
+            String origCompany = collectorToCompany.getOrDefault(origCollector, "");
+            if (requireDiffCompany) {
+                String lowCompany = personnelToCompany.getOrDefault(low.name, "");
+                boolean diffCompany = !lowCompany.equals(origCompany)
+                        || lowCompany.isEmpty() || origCompany.isEmpty();
+                if (!diffCompany) continue;
+            }
+            String dayKey = overdueDayKey(row);
+            int highDayCount = dayCounts.getOrDefault(high.name, Collections.emptyMap()).getOrDefault(dayKey, 0);
+            int lowDayCount = dayCounts.getOrDefault(low.name, Collections.emptyMap()).getOrDefault(dayKey, 0);
+            if (highDayCount <= lowDayCount) continue;
+            return i;
+        }
+        return -1;
+    }
+
+    private Map<String, Map<String, Integer>> buildPersonDayCounts(String[] assignments, List<String[]> caseRows) {
+        Map<String, Map<String, Integer>> counts = new HashMap<>();
+        for (int i = 0; i < assignments.length; i++) {
+            if (assignments[i] == null) continue;
+            String dayKey = overdueDayKey(caseRows.get(i));
+            counts.computeIfAbsent(assignments[i], k -> new HashMap<>()).merge(dayKey, 1, Integer::sum);
+        }
+        return counts;
+    }
+
+    private int maxAssigned(List<PersonQuota> quotas) {
+        return quotas.stream().mapToInt(q -> q.assigned).max().orElse(0);
+    }
+
+    private int minAssigned(List<PersonQuota> quotas) {
+        return quotas.stream().mapToInt(q -> q.assigned).min().orElse(0);
+    }
+
+    private String buildM1M2PersonStatsText(List<String[]> result) {
+        Map<String, AssignmentStat> stats = new LinkedHashMap<>();
+        for (String[] row : result) {
+            String person = row[RES_COL_ASSIGNED];
+            AssignmentStat stat = stats.computeIfAbsent(person, k -> new AssignmentStat());
+            stat.count++;
+            stat.totalDays += parseDouble(row[RES_COL_DAYS]);
+            stat.totalPeriods += parseDouble(row[RES_COL_PAID]);
+            stat.totalAmount += parseDouble(row[RES_COL_AMOUNT]);
+        }
+
+        StringBuilder sb = new StringBuilder();
+        stats.forEach((person, stat) -> {
+            if (sb.length() > 0) sb.append('\n');
+            sb.append(person)
+                    .append("：订单数量 ").append(stat.count)
+                    .append("，逾期天数 ").append(formatStatNumber(stat.totalDays))
+                    .append("，已还期数 ").append(formatStatNumber(stat.totalPeriods))
+                    .append("，逾期金额 ").append(formatMoney(stat.totalAmount));
+        });
+        return sb.toString();
+    }
+
+    private void updateM1M2DayStatsTable(DefaultTableModel model, List<String[]> result) {
+        buildM1M2DayStatsModel(model, result);
+    }
+
+    private DefaultTableModel buildM1M2DayStatsModel(List<String[]> result) {
+        DefaultTableModel model = new DefaultTableModel() {
+            @Override public boolean isCellEditable(int r, int c) { return false; }
+        };
+        buildM1M2DayStatsModel(model, result);
+        return model;
+    }
+
+    private void buildM1M2DayStatsModel(DefaultTableModel model, List<String[]> result) {
+        Set<String> dayKeys = new TreeSet<>(this::compareOverdueDayKey);
+        Map<String, Map<String, Integer>> personDayCounts = new LinkedHashMap<>();
+        for (String[] row : result) {
+            String person = row[RES_COL_ASSIGNED];
+            String dayKey = overdueDayKey(row);
+            dayKeys.add(dayKey);
+            personDayCounts.computeIfAbsent(person, k -> new LinkedHashMap<>())
+                    .merge(dayKey, 1, Integer::sum);
+        }
+
+        List<String> columns = new ArrayList<>();
+        columns.add("分案人员");
+        columns.add("合计");
+        for (String dayKey : dayKeys) columns.add(dayKey + "天");
+
+        Object[][] data = new Object[personDayCounts.size()][columns.size()];
+        int rowIdx = 0;
+        for (Map.Entry<String, Map<String, Integer>> entry : personDayCounts.entrySet()) {
+            Map<String, Integer> dayCount = entry.getValue();
+            int total = dayCount.values().stream().mapToInt(Integer::intValue).sum();
+            data[rowIdx][0] = entry.getKey();
+            data[rowIdx][1] = total;
+            int colIdx = 2;
+            for (String dayKey : dayKeys) {
+                data[rowIdx][colIdx++] = dayCount.getOrDefault(dayKey, 0);
+            }
+            rowIdx++;
+        }
+        model.setDataVector(data, columns.toArray());
+    }
+
+    private void showM1M2DayStatsDialog(List<String[]> result) {
+        JDialog dialog = new JDialog(frame, "逾期天数分布", false);
+        dialog.setSize(720, 460);
+        dialog.setLocationRelativeTo(frame);
+        dialog.setLayout(new BorderLayout(8, 8));
+
+        JLabel title = new JLabel("逾期天数分布 - 每人每天分配数量");
+        title.setFont(title.getFont().deriveFont(Font.BOLD, 13f));
+        title.setBorder(BorderFactory.createEmptyBorder(10, 12, 4, 12));
+        dialog.add(title, BorderLayout.NORTH);
+
+        JTable table = new JTable(buildM1M2DayStatsModel(result));
+        table.setFont(F_LABEL);
+        table.setRowHeight(26);
+        table.getTableHeader().setFont(F_BOLD_13);
+        table.getTableHeader().setReorderingAllowed(false);
+        table.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
+        if (table.getColumnCount() > 0) table.getColumnModel().getColumn(0).setPreferredWidth(120);
+        if (table.getColumnCount() > 1) table.getColumnModel().getColumn(1).setPreferredWidth(70);
+        for (int i = 2; i < table.getColumnCount(); i++) table.getColumnModel().getColumn(i).setPreferredWidth(70);
+        dialog.add(new JScrollPane(table), BorderLayout.CENTER);
+
+        JButton btnClose = new JButton("关闭");
+        btnClose.addActionListener(e -> dialog.dispose());
+        JPanel bp = new JPanel(new FlowLayout(FlowLayout.RIGHT, 12, 6));
+        bp.add(btnClose);
+        dialog.add(bp, BorderLayout.SOUTH);
+        dialog.setVisible(true);
+    }
+
+    private String formatStatNumber(double value) {
+        if (Math.abs(value - Math.rint(value)) < 0.000001) {
+            return String.valueOf((long) Math.rint(value));
+        }
+        return String.format(Locale.ROOT, "%.2f", value);
+    }
+
+    private String formatMoney(double value) {
+        return String.format(Locale.ROOT, "%.2f", value);
+    }
+
     /** 将字符串解析为 double，无法解析时返回 0.0 */
     private double parseDouble(String s) {
         if (s == null || s.trim().isEmpty()) return 0.0;
@@ -964,8 +1249,8 @@ public class OverdueCaseAssignmentTool {
     }
 
     private boolean trySwapM1M2(String[] assignments, List<String[]> caseRows, List<PersonQuota> quotas,
-                                  int currentIdx, String origCollector, String origCompany,
-                                  Map<String, String> personnelToCompany) {
+                                  Map<String, PersonQuota> quotaByName,
+                                  int currentIdx, String[] currentRow, String origCollector) {
         PersonQuota onlyAvail = null;
         for (PersonQuota pq : quotas) {
             if (pq.remaining() > 0) { onlyAvail = pq; break; }
@@ -977,9 +1262,13 @@ public class OverdueCaseAssignmentTool {
             if (assignedPerson.equals(onlyAvail.name)) continue;
             String iOrigCollector = caseRows.get(i)[COL_COLLECTOR];
             if (!onlyAvail.name.equals(iOrigCollector) && !assignedPerson.equals(origCollector)) {
+                PersonQuota assignedQuota = quotaByName.get(assignedPerson);
+                if (assignedQuota == null) continue;
+                assignedQuota.removeCase(caseRows.get(i));
+                assignedQuota.addCase(currentRow);
+                onlyAvail.addCase(caseRows.get(i));
                 assignments[currentIdx] = assignedPerson;
                 assignments[i] = onlyAvail.name;
-                onlyAvail.assigned++;
                 return true;
             }
         }
@@ -1083,7 +1372,7 @@ public class OverdueCaseAssignmentTool {
 
         // 转为 PersonQuota 方便复用 remaining() 接口
         List<PersonQuota> quotas = new ArrayList<>();
-        for (int i = 0; i < n; i++) quotas.add(new PersonQuota(companies.get(i), quota[i]));
+        for (int i = 0; i < n; i++) quotas.add(new PersonQuota(companies.get(i), quota[i], i));
 
         // 打乱案件顺序，贪心分配
         List<String[]> shuffled = new ArrayList<>(caseRows);
@@ -1276,29 +1565,48 @@ public class OverdueCaseAssignmentTool {
 
     // ==================== 内部类 ====================
 
+    private static class AssignmentStat {
+        int count;
+        double totalDays;
+        double totalPeriods;
+        double totalAmount;
+    }
+
     private static class PersonQuota {
         final String name;
         final int quota;
+        final int order;
         int assigned;
-        // 三项指标累计（逾期天数、已还期数、逾期金额），用于次级均衡
+        // 三项指标累计用于兜底交换时保持人员负载状态同步
         double totalDays;
         double totalPeriods;
         double totalAmount;
 
-        PersonQuota(String name, int quota) { this.name = name; this.quota = quota; }
+        PersonQuota(String name, int quota, int order) {
+            this.name = name;
+            this.quota = quota;
+            this.order = order;
+        }
         int remaining() { return quota - assigned; }
 
-        /**
-         * 综合负载得分（越小越优先被分配）
-         * avgDays/avgPeriods/avgAmount 为全局各维度平均目标值
-         * 若某维度目标为0表示数据全空，忽略该维度
-         */
-        double loadScore(double avgDays, double avgPeriods, double avgAmount) {
-            double score = 0;
-            if (avgDays > 0)    score += totalDays    / avgDays;
-            if (avgPeriods > 0) score += totalPeriods / avgPeriods;
-            if (avgAmount > 0)  score += totalAmount  / avgAmount;
-            return score;
+        void addCase(String[] row) {
+            assigned++;
+            totalDays    += parseDoubleStatic(row[COL_OVERDUE_DAYS]);
+            totalPeriods += parseDoubleStatic(row[COL_REPAID_PERIODS]);
+            totalAmount  += parseDoubleStatic(row[COL_OVERDUE_AMOUNT]);
+        }
+
+        void removeCase(String[] row) {
+            assigned--;
+            totalDays    -= parseDoubleStatic(row[COL_OVERDUE_DAYS]);
+            totalPeriods -= parseDoubleStatic(row[COL_REPAID_PERIODS]);
+            totalAmount  -= parseDoubleStatic(row[COL_OVERDUE_AMOUNT]);
+        }
+
+        private static double parseDoubleStatic(String s) {
+            if (s == null || s.trim().isEmpty()) return 0.0;
+            try { return Double.parseDouble(s.trim().replace(",", "")); }
+            catch (NumberFormatException e) { return 0.0; }
         }
     }
 
@@ -1314,6 +1622,8 @@ public class OverdueCaseAssignmentTool {
         JScrollPane personnelScrollPane;
         JLabel statusLabel;
         JLabel lblStats;
+        JTextArea statsTextArea;
+        DefaultTableModel dayStatsTableModel;
         JLabel ratioSumLabel;   // M3 合计显示
         JButton btnExport;
         DefaultTableModel tableModel;
